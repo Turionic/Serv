@@ -1,0 +1,277 @@
+import socket
+from thread import *
+import threading
+import datetime 
+import mysql.connector
+
+HOST = '0.0.0.0'
+PORT = 23
+#Password for administrative Prompt. Implement bycrpt
+PASSWORD = "password"
+#Lock for adding to Database
+Add_lock = threading.Lock()
+
+#Database connection info. You SHOULD NOT USE ROOT! Let alone root with no password
+mydb = mysql.connector.connect(
+      host="localhost",
+      user="root",
+      passwd=""
+    )
+
+mycursor = mydb.cursor(buffered=True)
+
+insert_new_device = ("INSERT INTO Devices (Address, DeviceInfo, Hostname, Date) "
+                     "VALUES (%s, %s, %s, %s)")
+
+update_old_device = ("UPDATE Devices SET Date = %s "
+                     "WHERE DeviceID = %s")
+
+select_last_record = ("SELECT * FROM Devices ORDER BY DeviceID DESC LIMIT 1")
+
+search_for_device = ("SELECT * FROM Devices WHERE Hostname = %s")
+
+#Used for checking Database and Table 
+Devices = ('DeviceID', 'int(11)') , ('Address', 'varchar(255)'), ('DeviceInfo', 'varchar(255)'), ('Hostname', 'varchar(255)'), ('Date','varchar(255)');
+
+#Determines if Database is formatted correctly
+def CheckDataBaseTables():
+    mycursor.execute("SHOW TABLES")
+    for x in mycursor:
+        if x[0] == "Devices":
+            print ("Devices Table Found, Checking..."),
+            mycursor.execute("DESCRIBE Devices")
+            i = 0
+            #Select Tables Description line retruned by DESCRIBE Devices
+            for x in mycursor:
+                it = 0
+                #Select Item from Table Description Line
+                for item in x:
+                    #Only go for 2 iterations
+                    if it >= 2:
+                        break
+                    #Compare Devices Check to item in Table line
+                    #i = column Name
+                    #it = Name check, Column type 
+                    if Devices[i][it] == item:
+                        #print str(item) + " = " + Devices[i][it]
+                        it = it + 1
+                    else:
+                        print "FAIL \n. Invalid Tables"
+                        print str(item) + " != " + Devices[i][it]
+                        exit()
+                i = i + 1
+
+# Checks to see if Database has already been created
+# Creates it if not 
+def DatabaseINIT():
+    if mycursor.execute("SHOW DATABASES"):
+        print "SQL Connection error or Invalid permissions"
+        exit()
+        
+    for x in mycursor:
+        if (x[0] == "ServDatabase"):
+            print "ServDatabase Detected"
+            mycursor.execute("USE ServDatabase")
+            print ("Checking Database Intergrity")
+            CheckDataBaseTables()
+            print "Ok"
+            return
+
+
+            
+    print ("Creating Databases..."),
+
+    if mycursor.execute("CREATE DATABASE ServDatabase"):
+        print "FAIL \nDatabase unable to be created. Invalid Permissions?"
+        exit()
+    print "Ok"
+
+    if mycursor.execute("USE ServDatabase"):
+        print "Unable to USE ServDatabase"
+        exit()
+    
+    print ("Creating Tables..."),
+    if mycursor.execute("CREATE TABLE Devices(DeviceID int NOT NULL AUTO_INCREMENT PRIMARY KEY, Address varchar(255), DeviceInfo varchar(255), Hostname varchar(255), Date varchar(255))"):
+        print "Error Creating Tables"
+        exit()
+    print "Ok"
+    print "Database Created!"
+    return
+
+#  SQL Databse Layout 
+#
+#   (INT)    CHAR(255)   CHAR(255)   CHAR(255)  CHAR(255)
+# Device ID | Address | Deviceinfo | Hostname | Date Added |
+# ----------------------------------------------------------
+#     1     | 127.0.. |  Linux     |  example |Jan 1st 1970|
+#-----------------------------------------------------------
+
+
+
+
+
+# (Address , PC Info [ HostName, Date added)
+
+#Closes connection, Simple.
+def ClientClose(c):
+    c.send("Closing Connection\0")
+    c.close()
+    Add_lock.release()
+    return
+
+#Prompt for administrative CLI
+def Prompt(c):
+    c.send("> ")
+    return (c.recv(1024)).rstrip("\r\n")
+
+def PrintConns(client, command):
+        i = 0
+        for OP in command:
+            i = i + 1
+            if OP == "-s":
+                print OP
+                print command
+                mycursor.execute("SELECT * FROM Devices WHERE DeviceID = %s", (command[i],))
+                print mycursor
+                break
+            else:
+                mycursor.execute("SELECT * FROM Devices")
+        i = 0
+        for PC in mycursor:
+                 i = i + 1
+                 client.send("Device " + str(PC[0]) + "\n")
+                 client.send("     Connection Address: " + PC[1] + "\n")
+                 client.send("     Device Info: " + PC[2] + "\n")
+                 client.send("     Host Name: " + PC[3] + "\n")
+                 client.send("     Time of Last Connection: " + PC[4] + "\n")
+        return
+                                                                
+
+
+
+
+
+def AdminMenu(command):
+    if command[0] == "help":
+        return " help - Return Help Menu \n exit - End Connection\n show - Show all devices logged\n"
+    if command[0] == "show":
+        return 2
+    if command[0] == "del":
+        return 3
+
+    return " "
+
+
+def DeleteDevice(c, command):
+    mycursor.execute("DELETE FROM Devices WHERE DeviceID = %s", (command[1],))
+    mydb.commit()
+    c.send("Deleted Device "
+           + str(command[1])
+           + "\n")
+    return
+
+
+
+def AdministrativeCLI(c):
+    c.send("Administrative CLI for Serv CLient\n\0")
+    c.send("Password: ");
+    data = (c.recv(1024)).rstrip("\r\n")
+    if data != PASSWORD:
+        c.send("Invalid Pass! \n Disconnecting!\n")
+        c.close()
+        return
+    c.send("Password Accepted\n")
+    command = [None,] 
+    while command[0] != "exit":
+        command = Prompt(c)
+        command = command.split(" ")
+        menuop = AdminMenu(command)
+        if menuop == 2:
+            PrintConns(c, command)
+        elif menuop == 3:
+            DeleteDevice(c, command)
+        else:
+            c.send(menuop)
+    c.send("Exiting!\n")
+    c.close()
+    return
+    
+def ClientAdd(c, addr):
+    c.send("ConnectionTest\0")
+    data = c.recv(1024)
+    #REMOVE FOUND! ITS NOT USED!
+    found = 0
+    
+    if data.rstrip("\n\r") == "AdminMenu":
+        Add_lock.release()
+        AdministrativeCLI(c)
+        return
+    #Search for device hostname in Database
+    mycursor.execute(search_for_device, (data.rstrip("\r\n"),));
+    DeviceFinal = mycursor.fetchone()
+    #If device is not found, move onto creating device
+    if DeviceFinal == None:
+        i = 1
+    else:
+        #Update old device with new time
+        mycursor.execute(update_old_device, (str(datetime.datetime.now()), DeviceFinal[0]))
+        mydb.commit()
+        c.send("Update\0")
+        ClientClose(c)
+        return
+        
+    if found == 0:
+        c.send("Info\0")
+        data = c.recv(1024)
+        #Splits data from client into list. Systeminfo [ System Hostname
+        #Checks to makesure data is formatted correctly 
+	if "[" in data:
+                data = data.split("[")
+                #mycursor.execute(select_last_record)
+                #DeviceFinal = mycursor.fetchone()
+                #If no previous records are found, DeviceID is 1
+                #if DeviceFinal == None:
+                #    DeviceID = 1
+                #else:
+                #    #Increment to next Device ID
+                #    DeviceID = DeviceFinal[0] + 1
+                #Insert new device into database
+                mycursor.execute(insert_new_device,(addr[0], data[0], data[1], str(datetime.datetime.now())))
+                mydb.commit()
+        	c.send("Added\0")
+        	ClientClose(c)
+        	return
+	else:
+		print "Device sent malformed data!\n"
+		c.send("Bitch u fucked up!\0")
+		ClientClose(c)
+                return
+    Add_lock.release()
+    return
+
+
+#Bind to port and start listening
+def SocketSetup():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind((HOST,PORT))
+    s.listen(5)
+    return s
+
+def main():
+
+        DatabaseINIT()
+        s = SocketSetup()
+        while True:
+            client, address = s.accept()
+            Add_lock.acquire()
+            start_new_thread(ClientAdd, (client, address))
+        s.close()
+
+
+
+
+
+
+
+if  __name__=="__main__":
+	main()
