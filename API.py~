@@ -1,0 +1,40 @@
+
+# This API is for programs that want all devices using ServClient and, if any, LOGGED (found on network range) devices
+
+import socket
+import mysql.connector
+
+BUFFLINE = 1024
+
+dump_query_base = "SELECT * FROM "
+
+
+def API(c, mydb):
+    mycursor =  mydb.cursor(buffered=True)
+    mycursor.execute("USE ServDatabase")
+    c.send("<API>")
+    data = (c.recv(BUFFLINE)).rstrip("\r\n")
+    if (data == "<DUMP>"): #<DUMP> sends all devices in each table
+        DataBases = ("Devices","Logged") #Devices database are Devices that use the ServClient, Logged are devices
+        #                                 found by network scan
+        for db in DataBases:
+            print db
+            c.send("<" + db + ">") #Send Database name to Application
+            data = c.recv(BUFFLINE).rstrip("\r\n")
+            if ( data != "<OK>"): 
+                exit()
+            #Since you can't parameterize a table name with mysql connector I concatenate them here. As the Databases variable is not user controlled,
+            #This won't open up any possible ways for SQLi. However, if this code is modified to take user input for the database name, you will need to
+            #clean their input.
+            dump_query = dump_query_base + db
+            mycursor.execute(dump_query)
+            for PC in mycursor: #For each PC send data and wait for application to send <OK> back
+                c.send("|".join(map(str, PC))
+                data = c.recv(BUFFLINE).rstrip("\r\n")
+                if( data != "<OK>"):
+                    exit()
+            c.send("<END>")
+            data = c.recv(BUFFLINE).rstrip("\r\n")
+            if( data != "<OK>"):
+                exit()
+            return                                                        

@@ -1,0 +1,157 @@
+import mysql.connector
+import datetime
+import logging
+
+
+
+# In order to keep from opening a new db connection everytime any function is called
+# I have these declared as global
+mydb = None
+mycursor = None
+
+# These vars are temporaily global until rest of code gets finished
+#insert_new_device = ("INSERT INTO Devices (Address, DeviceInfo, Hostname, Date) "
+#                     "VALUES (%s, %s, %s, %s)")
+
+
+
+#select_last_record = ("SELECT * FROM Devices ORDER BY DeviceID DESC LIMIT 1")
+
+#search_for_device = ("SELECT * FROM Devices WHERE Hostname = %s")
+
+
+#TABLE SETUP
+#Used for checking Database and Table                                                                                                                       
+Devices = ('DeviceID', 'int(11)') , ('Address', 'varchar(255)'), ('DeviceInfo', 'varchar(255)'), ('Hostname', 'varchar(255)'), ('Date','varchar(255)');
+
+
+#  Devices Table Layout                                                                                                                                       
+#                                                                                                                                                           
+#   (INT)    CHAR(255)   CHAR(255)   CHAR(255)  CHAR(255)                                                                                                   
+# Device ID | Address | Deviceinfo | Hostname | Date Added |                                                                                                
+# ----------------------------------------------------------                                                                                                
+#     1     | 127.0.. |  Linux     |  example |Jan 1st 1970|                                                                                                
+#-----------------------------------------------------------                                                                                                
+
+class DatabaseOperation():
+    def SelectAll():
+        return mycursor.execute("SELECT * FROM Devices")
+    
+    def SelectItemByID(id):
+        return mycursor.execute("SELECT * FROM Devices WHERE DeviceID = %s", (id,))
+
+    def SelectItemByHostname(Hostname):
+        mycursor.execute("SELECT * FROM Devices WHERE Hostname = %s", (Hostname,))
+        return mycursor.fetchone()
+    
+    def AddDevice(Device): #Takes tuple 
+        insert_new_device = ("INSERT INTO Devices (Address, DeviceInfo, Hostname, Date) "
+                             "VALUES (%s, %s, %s, %s)")
+        mycursor.execute(insert_new_device, Device)
+        mydb.commit()
+        return
+
+    def UpdateDevice(id):
+        update_old_device = ("UPDATE Devices SET Date = %s "
+                             "WHERE DeviceID = %s")
+        mycursor.execute(update_old_device, (str(datatime.datetime.now()), id))
+        mydb.commit()
+        return
+    
+    def DeleteDevice(id):
+        mycursor.execute("DELETE FROM Devices WHERE DeviceID = %s", (id,))
+        mydb.commit()
+        return
+
+class DatabaseOpen():
+
+    mydb = None
+    mycursor = None
+    def OpenConnection(self):
+        #Opens connection to SQL database. Error checking
+        try:
+            #Database connection info. You SHOULD NOT USE ROOT! Let alone root with no password                                                                        
+            self.mydb = mysql.connector.connect(
+                host="localhost",
+                user="root",
+                passwd=""
+            )
+            self.mycursor = self.mydb.cursor(buffered=True)
+        except:
+            logging.critical("Something went wrong: %s")
+    
+    #Determines if Database is formatted correctly                                                                                                              
+    def CheckDataBaseTables(self):
+
+        self.mycursor.execute("SHOW TABLES")
+        for x in self.mycursor:
+            if x[0] == "Devices":
+                logging.info("Devices Table Found, Checking...")
+                self.mycursor.execute("DESCRIBE Devices")
+                i = 0
+                #Select Tables Description line retruned by DESCRIBE Devices                                                                                    
+                for x in self.mycursor:
+                    it = 0
+                    #Select Item from Table Description Line                                                                                                    
+                    for item in x:
+                        #Only go for 2 iterations so as to grab both column name and var type                                                                                                       
+                        if it >= 2:
+                            break
+                        #Compare Devices Check to item in Table line                                                                                            
+                                                                                                                                                                                                                                            
+                        if Devices[i][it] == item:
+                            #print str(item) + " = " + Devices[i][it]                                                                                           
+                            it = it + 1
+                        else:
+                            logging.critical("FAIL \n. Invalid Tables")
+                            logging.critical("%s != %s", str(item) , Devices[i][it])
+                            exit()
+                    i = i + 1
+
+
+    #Checks to see if database exists
+    #If so it calls CheckDataBaseTables()
+    #if not it makes a table
+    def DatabaseINIT(self):
+        self.OpenConnection()
+        if self.mycursor.execute("SHOW DATABASES"):
+            logging.critical("SQL Connection error or Invalid permissions")
+            exit()
+
+        for x in self.mycursor:
+            if (x[0] == "ServDatabase"):
+                logging.info("ServDatabase Detected")
+                self.mycursor.execute("USE ServDatabase")
+                logging.info("Checking Database Intergrity")
+                self.CheckDataBaseTables()
+                return
+
+
+        # On first run it will create database and print status to console
+        print ("Creating Databases..."),
+
+        if self.mycursor.execute("CREATE DATABASE ServDatabase"):
+            print "FAIL \nDatabase unable to be created. Invalid Permissions?"
+            exit()
+        print "Ok"
+
+        if self.mycursor.execute("USE ServDatabase"):
+            print "Unable to USE ServDatabase"
+            exit()
+
+        print ("Creating Tables..."),
+        if self.mycursor.execute("CREATE TABLE Devices(DeviceID int NOT NULL AUTO_INCREMENT PRIMARY KEY, Address varchar(255), DeviceInfo varchar(255), Hostname var\
+char(255), Date varchar(255))"):
+            print "Error Creating Tables"
+            exit()
+        print "Ok"
+        print "Database Created!"
+        return self.mydb
+
+
+
+
+
+# If Database.py is called alone, it will perform database creation / checking
+if __name__ == "__main__":
+    DatabaseINIT()
